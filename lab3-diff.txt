@@ -1,0 +1,284 @@
+diff --git a/barrier b/barrier
+index 5828c97..df28033 100755
+Binary files a/barrier and b/barrier differ
+diff --git a/lab3-diff.txt b/lab3-diff.txt
+index 6ed78b2..e69de29 100644
+--- a/lab3-diff.txt
++++ b/lab3-diff.txt
+@@ -1,276 +0,0 @@
+-diff --git a/Makefile b/Makefile
+-index 8e4f945..07fb897 100644
+---- a/Makefile
+-+++ b/Makefile
+-@@ -147,6 +147,7 @@ UPROGS=\
+- 	$U/_primes\
+- 	$U/_tracetest\
+- 	$U/_yieldtest\
+-+	$U/_uthread\
+- 
+- ph: notxv6/ph.c
+- 	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
+-diff --git a/notxv6/barrier.c b/notxv6/barrier.c
+-index e8ed2db..baed932 100644
+---- a/notxv6/barrier.c
+-+++ b/notxv6/barrier.c
+-@@ -25,6 +25,18 @@ barrier_init(void)
+- static void 
+- barrier()
+- {
+-+  pthread_mutex_lock(&bstate.barrier_mutex);
+-+  bstate.nthread++;
+-+  if(bstate.nthread!=nthread)
+-+  {
+-+    pthread_cond_wait(&bstate.barrier_cond,&bstate.barrier_mutex);
+-+  }else{
+-+    bstate.nthread=0;
+-+    bstate.round++;
+-+    pthread_cond_broadcast(&bstate.barrier_cond);
+-+  }
+-+  
+-+  pthread_mutex_unlock(&bstate.barrier_mutex);
+-   // YOUR CODE HERE
+-   //
+-   // Block until all threads have called barrier() and
+-@@ -39,9 +51,9 @@ thread(void *xa)
+-   long n = (long) xa;
+-   long delay;
+-   int i;
+--
+-   for (i = 0; i < 20000; i++) {
+-     int t = bstate.round;
+-+    //printf("round:%d\n",t);
+-     assert (i == t);
+-     barrier();
+-     usleep(random() % 100);
+-@@ -67,7 +79,6 @@ main(int argc, char *argv[])
+-   srandom(0);
+- 
+-   barrier_init();
+--
+-   for(i = 0; i < nthread; i++) {
+-     assert(pthread_create(&tha[i], NULL, thread, (void *) i) == 0);
+-   }
+-diff --git a/notxv6/ph.c b/notxv6/ph.c
+-index 27a9cd1..1fe1128 100644
+---- a/notxv6/ph.c
+-+++ b/notxv6/ph.c
+-@@ -4,7 +4,6 @@
+- #include <assert.h>
+- #include <pthread.h>
+- #include <sys/time.h>
+--
+- #define NBUCKET 5
+- #define NKEYS 100000
+- 
+-@@ -16,7 +15,7 @@ struct entry {
+- struct entry *table[NBUCKET];
+- int keys[NKEYS];
+- int nthread = 1;
+--
+-+pthread_mutex_t mtx;
+- 
+- double
+- now()
+-@@ -28,6 +27,7 @@ now()
+- 
+- static void 
+- insert(int key, int value, struct entry **p, struct entry *n)
+-+//插入
+- {
+-   struct entry *e = malloc(sizeof(struct entry));
+-   e->key = key;
+-@@ -36,6 +36,7 @@ insert(int key, int value, struct entry **p, struct entry *n)
+-   *p = e;
+- }
+- 
+-+
+- static 
+- void put(int key, int value)
+- {
+-@@ -43,10 +44,11 @@ void put(int key, int value)
+- 
+-   // is the key already present?
+-   struct entry *e = 0;
+--  for (e = table[i]; e != 0; e = e->next) {
+-+  for (e = table[i]; e != 0; e = e->next) {    
+-     if (e->key == key)
+-       break;
+-   }
+-+  pthread_mutex_lock(&mtx);
+-   if(e){
+-     // update the existing key.
+-     e->value = value;
+-@@ -54,7 +56,20 @@ void put(int key, int value)
+-     // the new is new.
+-     insert(key, value, &table[i], table[i]);
+-   }
+-+  pthread_mutex_unlock(&mtx);
+-+}
+- 
+-+static void *
+-+put_thread(void *xa)
+-+{
+-+  int n = (int) (long) xa; // thread number
+-+  int b = NKEYS/nthread;
+-+
+-+  for (int i = 0; i < b; i++) {
+-+    
+-+    put(keys[b*n + i], n);
+-+  }
+-+  return NULL;
+- }
+- 
+- static struct entry*
+-@@ -62,7 +77,6 @@ get(int key)
+- {
+-   int i = key % NBUCKET;
+- 
+--
+-   struct entry *e = 0;
+-   for (e = table[i]; e != 0; e = e->next) {
+-     if (e->key == key) break;
+-@@ -71,19 +85,6 @@ get(int key)
+-   return e;
+- }
+- 
+--static void *
+--put_thread(void *xa)
+--{
+--  int n = (int) (long) xa; // thread number
+--  int b = NKEYS/nthread;
+--
+--  for (int i = 0; i < b; i++) {
+--    put(keys[b*n + i], n);
+--  }
+--
+--  return NULL;
+--}
+--
+- static void *
+- get_thread(void *xa)
+- {
+-@@ -98,14 +99,14 @@ get_thread(void *xa)
+-   return NULL;
+- }
+- 
+-+
+- int
+- main(int argc, char *argv[])
+- {
+-   pthread_t *tha;
+-   void *value;
+-   double t1, t0;
+--
+--
+-+  pthread_mutex_init(&mtx,NULL);
+-   if (argc < 2) {
+-     fprintf(stderr, "Usage: %s nthreads\n", argv[0]);
+-     exit(-1);
+-@@ -113,9 +114,9 @@ main(int argc, char *argv[])
+-   nthread = atoi(argv[1]);
+-   tha = malloc(sizeof(pthread_t) * nthread);
+-   srandom(0);
+--  assert(NKEYS % nthread == 0);
+-+  assert(NKEYS % nthread == 0);//判断线程数
+-   for (int i = 0; i < NKEYS; i++) {
+--    keys[i] = random();
+-+    keys[i] = random();//初始化keys表
+-   }
+- 
+-   //
+-@@ -128,7 +129,7 @@ main(int argc, char *argv[])
+-   for(int i = 0; i < nthread; i++) {
+-     assert(pthread_join(tha[i], &value) == 0);
+-   }
+--  t1 = now();
+-+  t1 = now();//计算时间
+- 
+-   printf("%d puts, %.3f seconds, %.0f puts/second\n",
+-          NKEYS, t1 - t0, NKEYS / (t1 - t0));
+-diff --git a/user/uthread.c b/user/uthread.c
+-index a6e3800..7c15499 100644
+---- a/user/uthread.c
+-+++ b/user/uthread.c
+-@@ -12,6 +12,24 @@
+- 
+- 
+- struct thread {
+-+  struct context {
+-+    uint64 ra;
+-+    uint64 sp;
+-+
+-+    // callee-saved
+-+    uint64 s0;
+-+    uint64 s1;
+-+    uint64 s2;
+-+    uint64 s3;
+-+    uint64 s4;
+-+    uint64 s5;
+-+    uint64 s6;
+-+    uint64 s7;
+-+    uint64 s8;
+-+    uint64 s9;
+-+    uint64 s10;
+-+    uint64 s11;
+-+  }context;
+-   char       stack[STACK_SIZE]; /* the thread's stack */
+-   int        state;             /* FREE, RUNNING, RUNNABLE */
+- };
+-@@ -56,6 +74,7 @@ thread_schedule(void)
+-     next_thread->state = RUNNING;
+-     t = current_thread;
+-     current_thread = next_thread;
+-+    thread_switch((uint64)&t->context,(uint64)&current_thread->context);
+-     /* YOUR CODE HERE
+-      * Invoke thread_switch to switch from t to next_thread:
+-      * thread_switch(??, ??);
+-@@ -73,6 +92,8 @@ thread_create(void (*func)())
+-     if (t->state == FREE) break;
+-   }
+-   t->state = RUNNABLE;
+-+  t->context.ra=(uint64)func;//返回地址
+-+  t->context.sp=(uint64)t->stack+STACK_SIZE;//栈指针指向栈顶
+-   // YOUR CODE HERE
+- }
+- 
+-diff --git a/user/uthread_switch.S b/user/uthread_switch.S
+-index 44e1cec..65db591 100644
+---- a/user/uthread_switch.S
+-+++ b/user/uthread_switch.S
+-@@ -8,4 +8,34 @@
+- 	.globl thread_switch
+- thread_switch:
+- 	/* YOUR CODE HERE */
+-+	sd ra, 0(a0)
+-+    sd sp, 8(a0)
+-+    sd s0, 16(a0)
+-+    sd s1, 24(a0)
+-+    sd s2, 32(a0)
+-+    sd s3, 40(a0)
+-+    sd s4, 48(a0)
+-+    sd s5, 56(a0)
+-+    sd s6, 64(a0)
+-+    sd s7, 72(a0)
+-+    sd s8, 80(a0)
+-+    sd s9, 88(a0)
+-+    sd s10, 96(a0)
+-+    sd s11, 104(a0)
+-+
+-+    ld ra, 0(a1)
+-+    ld sp, 8(a1)
+-+    ld s0, 16(a1)
+-+    ld s1, 24(a1)
+-+    ld s2, 32(a1)
+-+    ld s3, 40(a1)
+-+    ld s4, 48(a1)
+-+    ld s5, 56(a1)
+-+    ld s6, 64(a1)
+-+    ld s7, 72(a1)
+-+    ld s8, 80(a1)
+-+    ld s9, 88(a1)
+-+    ld s10, 96(a1)
+-+    ld s11, 104(a1)
+-+        
+- 	ret    /* return to ra */

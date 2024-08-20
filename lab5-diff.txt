@@ -1,0 +1,327 @@
+diff --git a/Makefile b/Makefile
+index 07fb897..34d410b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -148,6 +148,7 @@ UPROGS=\
+ 	$U/_tracetest\
+ 	$U/_yieldtest\
+ 	$U/_uthread\
++	$U/_symlinktest\
+ 
+ ph: notxv6/ph.c
+ 	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
+diff --git a/kernel/exec.c b/kernel/exec.c
+index e4b8bc3..af5eccb 100644
+--- a/kernel/exec.c
++++ b/kernel/exec.c
+@@ -187,10 +187,10 @@ exec(char *path, char **argv)
+   p->trapframe->epc = elf.entry;  // initial program counter = main
+   p->trapframe->sp = sp; // initial stack pointer
+   proc_freepagetable(oldpagetable, oldsz);
+-  if(p->pid==1)
+-  {
+-    vmprint(p->pagetable,2);
+-  }
++  //if(p->pid>=1)
++  //{
++  //  vmprint(p->pagetable,2);
++  //}
+   return argc; // this ends up in a0, the first argument to main(argc, argv)
+ 
+  bad:
+diff --git a/kernel/fcntl.h b/kernel/fcntl.h
+index 44861b9..e5e38e3 100644
+--- a/kernel/fcntl.h
++++ b/kernel/fcntl.h
+@@ -3,3 +3,4 @@
+ #define O_RDWR    0x002
+ #define O_CREATE  0x200
+ #define O_TRUNC   0x400
++#define O_NOFOLLOW 0x800
+diff --git a/kernel/file.h b/kernel/file.h
+index b076d1d..5c4eb3a 100644
+--- a/kernel/file.h
++++ b/kernel/file.h
+@@ -26,7 +26,7 @@ struct inode {
+   short minor;
+   short nlink;
+   uint size;
+-  uint addrs[NDIRECT+1];
++  uint addrs[NDIRECT+2];
+ };
+ 
+ // map major device number to device functions.
+diff --git a/kernel/fs.c b/kernel/fs.c
+index c6bab15..d768c59 100644
+--- a/kernel/fs.c
++++ b/kernel/fs.c
+@@ -417,6 +417,45 @@ bmap(struct inode *ip, uint bn)
+     return addr;
+   }
+ 
++
++  bn -= NINDIRECT;
++  if(bn < NINDIRECT*NINDIRECT)
++  //Load double indirect block, allocating if necessary.
++  {
++    if((addr = ip->addrs[NDIRECT+1]) == 0)
++    {
++      addr = balloc(ip->dev);
++      if(addr == 0)
++        return 0;
++      ip->addrs[NDIRECT+1] = addr;
++    }
++    bp = bread(ip->dev, addr);
++    a = (uint*)bp->data;
++    if((addr = a[bn/NINDIRECT]) == 0)
++    {
++      addr = balloc(ip->dev);
++        if(addr){
++          a[bn/NINDIRECT] = addr;
++          log_write(bp);
++        }
++    }
++    brelse(bp);
++    bn %= NINDIRECT;
++    bp = bread(ip->dev, addr);
++    a = (uint*)bp->data;
++    if((addr = a[bn]) == 0)
++    {
++      addr = balloc(ip->dev);
++      if(addr)
++      {
++        a[bn] = addr;
++      log_write(bp);
++      }
++    }
++  brelse(bp);
++  return addr;
++}
++
+   panic("bmap: out of range");
+ }
+ 
+@@ -425,9 +464,11 @@ bmap(struct inode *ip, uint bn)
+ void
+ itrunc(struct inode *ip)
+ {
+-  int i, j;
++  int i, j,k;
+   struct buf *bp;
+   uint *a;
++  struct buf *bp1;
++  uint *b;
+ 
+   for(i = 0; i < NDIRECT; i++){
+     if(ip->addrs[i]){
+@@ -448,6 +489,33 @@ itrunc(struct inode *ip)
+     ip->addrs[NDIRECT] = 0;
+   }
+ 
++
++  if(ip->addrs[NDIRECT+1]){
++    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
++    a = (uint*)bp->data;
++    for(j = 0; j < NINDIRECT; j++){
++      if(a[j])
++      {
++        bp1 = bread(ip->dev,a[j]);
++        b = (uint *)bp1->data;
++        for(k=0;k<NINDIRECT;k++)
++        {
++          if(b[k])
++          {
++            bfree(ip->dev, b[k]);
++          }
++        } 
++        brelse(bp1);
++      }
++     
++      bfree(ip->dev, a[j]);
++      a[j]=0;
++    } 
++    brelse(bp);
++    bfree(ip->dev, ip->addrs[NDIRECT+1]);
++    ip->addrs[NDIRECT+1] = 0;
++
++  }
+   ip->size = 0;
+   iupdate(ip);
+ }
+diff --git a/kernel/fs.h b/kernel/fs.h
+index e76fd32..3107aa8 100644
+--- a/kernel/fs.h
++++ b/kernel/fs.h
+@@ -37,9 +37,9 @@ struct superblock {
+ // |     | <- DBL_INDIRECT
+ // +-----+
+ 
+-#define NDIRECT 12
++#define NDIRECT 11
+ #define NINDIRECT (BSIZE / sizeof(uint))
+-#define MAXFILE (NDIRECT + NINDIRECT)
++#define MAXFILE (NDIRECT + NINDIRECT + NINDIRECT*NINDIRECT)
+ 
+ // On-disk inode structure
+ struct dinode {
+@@ -48,7 +48,7 @@ struct dinode {
+   short minor;          // Minor device number (T_DEVICE only)
+   short nlink;          // Number of links to inode in file system
+   uint size;            // Size of file (bytes)
+-  uint addrs[NDIRECT+1];   // Data block addresses
++  uint addrs[NDIRECT+2];   // Data block addresses
+ };
+ 
+ // Inodes per block.
+diff --git a/kernel/param.h b/kernel/param.h
+index 6624bff..c1e89dc 100644
+--- a/kernel/param.h
++++ b/kernel/param.h
+@@ -1,4 +1,4 @@
+-#define NPROC        64  // maximum number of processes
++#define NPROC        10  // maximum number of processes
+ #define NCPU          8  // maximum number of CPUs
+ #define NOFILE       16  // open files per process
+ #define NFILE       100  // open files per system
+@@ -9,5 +9,5 @@
+ #define MAXOPBLOCKS  10  // max # of blocks any FS op writes
+ #define LOGSIZE      (MAXOPBLOCKS*3)  // max data blocks in on-disk log
+ #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
+-#define FSSIZE       2000  // size of file system in blocks
++#define FSSIZE       200000  // size of file system in blocks
+ #define MAXPATH      128   // maximum file path name
+diff --git a/kernel/stat.h b/kernel/stat.h
+index 0dffda7..a5c0449 100644
+--- a/kernel/stat.h
++++ b/kernel/stat.h
+@@ -1,6 +1,7 @@
+ #define T_DIR     1   // Directory
+ #define T_FILE    2   // File
+ #define T_DEVICE  3   // Device
++#define T_SYMLINK 4   //符号链接
+ 
+ struct stat {
+   int dev;     // File system's disk device
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index 6172149..9e135c7 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -103,6 +103,7 @@ extern uint64 sys_mkdir(void);
+ extern uint64 sys_close(void);
+ extern uint64 sys_trace(void);//added
+ extern uint64 sys_yield(void);
++extern uint64 sys_symlink(void);
+ // An array mapping syscall numbers from syscall.h
+ // to the function that handles the system call.
+ static uint64 (*syscalls[])(void) = {
+@@ -129,6 +130,7 @@ static uint64 (*syscalls[])(void) = {
+ [SYS_close]   sys_close,
+ [SYS_trace]   sys_trace,
+ [SYS_yield]   sys_yield,
++[SYS_symlink] sys_symlink, 
+ };
+ 
+ static char *sysname[]={
+@@ -155,6 +157,7 @@ static char *sysname[]={
+ [SYS_close]   "close",
+ [SYS_trace]   "trace",
+ [SYS_yield]   "yield",
++[SYS_symlink]  "symlink",
+ };
+ 
+ void
+diff --git a/kernel/syscall.h b/kernel/syscall.h
+index 10e77dd..e5cddee 100644
+--- a/kernel/syscall.h
++++ b/kernel/syscall.h
+@@ -22,4 +22,4 @@
+ #define SYS_close  21
+ #define SYS_trace  22
+ #define SYS_yield  23
+-
++#define SYS_symlink  24
+diff --git a/kernel/sysfile.c b/kernel/sysfile.c
+index f671f9e..1d67ce0 100644
+--- a/kernel/sysfile.c
++++ b/kernel/sysfile.c
+@@ -334,7 +334,27 @@ sys_open(void)
+       return -1;
+     }
+   }
+-
++  if(ip->type == T_SYMLINK){
++    if((omode & O_NOFOLLOW)==0){
++      int cycle = 0;
++      char target[MAXPATH];
++      while(ip->type == T_SYMLINK){
++        if(cycle == 10){
++          iunlockput(ip);
++          end_op();
++          return -1; // 最大循环
++        }
++        cycle++;
++        readi(ip, 0, (uint64)target, 0, MAXPATH);
++        iunlockput(ip);
++        if((ip = namei(target)) == 0){
++          end_op();
++          return -1; 
++        }
++        ilock(ip);
++      }
++    }
++  }
+   // There is no need to deal with symbolic links to directories.
+   // YOUR CODE HERE
+ 
+@@ -506,3 +526,29 @@ sys_pipe(void)
+   }
+   return 0;
+ }
++
++uint64
++sys_symlink(void)
++{
++  char target[MAXPATH];
++  char path[MAXPATH];
++  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0){
++    return -1;
++  }
++
++  struct inode *ip;//创建inode指向该target
++
++  begin_op();
++  if((ip = create(path, T_SYMLINK, 0, 0)) == 0){
++    end_op();
++    return -1;
++  }
++
++  if(writei(ip, 0, (uint64)target, 0, MAXPATH) != MAXPATH){
++    return -1;
++  }
++
++  iunlockput(ip);
++  end_op();
++  return 0;
++}
+diff --git a/user/user.h b/user/user.h
+index 241e932..d44b204 100644
+--- a/user/user.h
++++ b/user/user.h
+@@ -24,6 +24,8 @@ int sleep(int);
+ int uptime(void);
+ int trace(int);
+ void yield();
++int symlink(const char*,const char*);
++
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/user/usys.pl b/user/usys.pl
+index 3a20d45..e393e7c 100755
+--- a/user/usys.pl
++++ b/user/usys.pl
+@@ -38,3 +38,4 @@ entry("sleep");
+ entry("uptime");
+ entry("trace");
+ entry("yield");
++entry("symlink");

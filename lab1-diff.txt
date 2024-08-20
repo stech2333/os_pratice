@@ -1,0 +1,316 @@
+diff --git a/kernel/start.c b/kernel/start.c
+index 4e3bab2..e3debda 100644
+--- a/kernel/start.c
++++ b/kernel/start.c
+@@ -51,7 +51,10 @@ start()//内核启动入口。
+   int id = r_mhartid();
+   
+   w_tp(id);
+-
++  if(id==0)
++  {
++    printf("/kernel/start.c  start()        [161920320]     jumped to main()\n");
++  }
+   // switch to supervisor mode and jump to main().
+   asm volatile("mret");
+   
+diff --git a/lab1-diff.txt b/lab1-diff.txt
+index f2b25dd..e69de29 100644
+--- a/lab1-diff.txt
++++ b/lab1-diff.txt
+@@ -1,295 +0,0 @@
+-diff --git a/kernel/main.c b/kernel/main.c
+-index 49f1516..674da89 100644
+---- a/kernel/main.c
+-+++ b/kernel/main.c
+-@@ -13,10 +13,10 @@ void
+- main()
+- {
+-   if(cpuid() == 0){
+--    printf("/kernel/start.c         [161920320]     jumped to main()\n");
+-+    printf("/kernel/start.c  main.c cpu0        [161920320]     jumped to main()\n");
+-     consoleinit();
+-     printfinit();
+--    printf("/kernel/mian.c          [161920320]     CPU0 start,start initing");
+-+    printf("/kernel/mian.c  main.c cpu0        [161920320]     CPU0 start,start initing");
+-     printf("\n");
+-     printf("xv6 kernel is booting\n");
+-     printf("\n");
+-diff --git a/kernel/proc.c b/kernel/proc.c
+-index 645e93f..dbc6b84 100644
+---- a/kernel/proc.c
+-+++ b/kernel/proc.c
+-@@ -232,7 +232,7 @@ uchar initcode[] = {
+- void
+- userinit(void)
+- {
+--  printf("/Kernel/proc.c          [161920320]     Enter userinit\n");
+-+  printf("/Kernel/proc.c userinit()          [161920320]     Enter userinit\n");
+-   struct proc *p;
+- 
+-   p = allocproc();
+-@@ -240,7 +240,7 @@ userinit(void)
+-   
+-   // allocate one user page and copy initcode's instructions
+-   // and data into it.
+--  printf("/kernel/proc.c          [161920320]     copy initcode to the first user process\n");
+-+  printf("/kernel/proc.c userinit()         [161920320]     copy initcode to the first user process\n");
+-   uvmfirst(p->pagetable, initcode, sizeof(initcode));
+-   p->sz = PGSIZE;
+- 
+-diff --git a/lab1-diff.txt b/lab1-diff.txt
+-index fa801c2..e69de29 100644
+---- a/lab1-diff.txt
+-+++ b/lab1-diff.txt
+-@@ -1,238 +0,0 @@
+--diff --git a/lab1-diff.txt b/lab1-diff.txt
+--index 817aeab..e69de29 100644
+----- a/lab1-diff.txt
+--+++ b/lab1-diff.txt
+--@@ -1,233 +0,0 @@
+---diff --git a/Makefile b/Makefile
+---index b54389d..4cc2011 100644
+------ a/Makefile
+---+++ b/Makefile
+---@@ -142,6 +142,9 @@ UPROGS=\
+--- 	$U/_grind\
+--- 	$U/_wc\
+--- 	$U/_zombie\
+---+	$U/_sleep\
+---+	$U/_pingpong\
+---+	$U/_primes\
+--- 
+--- ph: notxv6/ph.c
+--- 	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
+---diff --git a/kernel/defs.h b/kernel/defs.h
+---index a3c962b..8ef352a 100644
+------ a/kernel/defs.h
+---+++ b/kernel/defs.h
+---@@ -187,3 +187,4 @@ void            virtio_disk_intr(void);
+--- 
+--- // number of elements in fixed-size array
+--- #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+---+
+---diff --git a/kernel/exec.c b/kernel/exec.c
+---index e18bbb6..d1b0bfa 100644
+------ a/kernel/exec.c
+---+++ b/kernel/exec.c
+---@@ -119,7 +119,7 @@ exec(char *path, char **argv)
+---     if(*s == '/')
+---       last = s+1;
+---   safestrcpy(p->name, last, sizeof(p->name));
+----    
+---+   
+---   // Commit to the user image.
+---   oldpagetable = p->pagetable;
+---   p->pagetable = pagetable;
+---diff --git a/kernel/main.c b/kernel/main.c
+---index f0d3171..49f1516 100644
+------ a/kernel/main.c
+---+++ b/kernel/main.c
+---@@ -4,6 +4,8 @@
+--- #include "riscv.h"
+--- #include "defs.h"
+--- 
+---+
+---+
+--- volatile static int started = 0;
+--- 
+--- // start() jumps here in supervisor mode on all CPUs.
+---@@ -11,8 +13,10 @@ void
+--- main()
+--- {
+---   if(cpuid() == 0){
+---+    printf("/kernel/start.c         [161920320]     jumped to main()\n");
+---     consoleinit();
+---     printfinit();
+---+    printf("/kernel/mian.c          [161920320]     CPU0 start,start initing");
+---     printf("\n");
+---     printf("xv6 kernel is booting\n");
+---     printf("\n");
+---@@ -28,13 +32,14 @@ main()
+---     iinit();         // inode table
+---     fileinit();      // file table
+---     virtio_disk_init(); // emulated hard disk
+---+    //printf("[161920320]   Start the first user process\n");
+---     userinit();      // first user process
+---     __sync_synchronize();
+---     started = 1;
+---   } else {
+---     while(started == 0)
+---       ;
+----    __sync_synchronize();
+---+    __sync_synchronize();//线程同步数据
+---     printf("hart %d starting\n", cpuid());
+---     kvminithart();    // turn on paging
+---     trapinithart();   // install kernel trap vector
+---diff --git a/kernel/proc.c b/kernel/proc.c
+---index 959b778..645e93f 100644
+------ a/kernel/proc.c
+---+++ b/kernel/proc.c
+---@@ -232,6 +232,7 @@ uchar initcode[] = {
+--- void
+--- userinit(void)
+--- {
+---+  printf("/Kernel/proc.c          [161920320]     Enter userinit\n");
+---   struct proc *p;
+--- 
+---   p = allocproc();
+---@@ -239,6 +240,7 @@ userinit(void)
+---   
+---   // allocate one user page and copy initcode's instructions
+---   // and data into it.
+---+  printf("/kernel/proc.c          [161920320]     copy initcode to the first user process\n");
+---   uvmfirst(p->pagetable, initcode, sizeof(initcode));
+---   p->sz = PGSIZE;
+--- 
+---@@ -250,7 +252,7 @@ userinit(void)
+---   p->cwd = namei("/");
+--- 
+---   p->state = RUNNABLE;
+----
+---+  
+---   release(&p->lock);
+--- }
+--- 
+---diff --git a/kernel/start.c b/kernel/start.c
+---index e16f18a..4e3bab2 100644
+------ a/kernel/start.c
+---+++ b/kernel/start.c
+---@@ -18,14 +18,14 @@ extern void timervec();
+--- 
+--- // entry.S jumps here in machine mode on stack0.
+--- void
+----start()
+---+start()//内核启动入口。
+--- {
+---   // set M Previous Privilege mode to Supervisor, for mret.
+---   unsigned long x = r_mstatus();
+---   x &= ~MSTATUS_MPP_MASK;
+---   x |= MSTATUS_MPP_S;
+---   w_mstatus(x);
+----
+---+  
+---   // set M Exception Program Counter to main, for mret.
+---   // requires gcc -mcmodel=medany
+---   w_mepc((uint64)main);
+---@@ -43,15 +43,18 @@ start()
+---   w_pmpaddr0(0x3fffffffffffffull);
+---   w_pmpcfg0(0xf);
+--- 
+----  // ask for clock interrupts.
+---+  // ask for clock interrupts.时钟中断
+---   timerinit();
+---+  //printf("init time\n");
+--- 
+---   // keep each CPU's hartid in its tp register, for cpuid().
+---   int id = r_mhartid();
+---+  
+---   w_tp(id);
+--- 
+---   // switch to supervisor mode and jump to main().
+---   asm volatile("mret");
+---+  
+--- }
+--- 
+--- // arrange to receive timer interrupts.
+---@@ -64,6 +67,7 @@ timerinit()
+--- {
+---   // each CPU has a separate source of timer interrupts.
+---   int id = r_mhartid();
+---+  
+--- 
+---   // ask the CLINT for a timer interrupt.
+---   int interval = 1000000; // cycles; about 1/10th second in qemu.
+---diff --git a/kernel/syscall.c b/kernel/syscall.c
+---index ed65409..89bb5d6 100644
+------ a/kernel/syscall.c
+---+++ b/kernel/syscall.c
+---@@ -101,7 +101,6 @@ extern uint64 sys_unlink(void);
+--- extern uint64 sys_link(void);
+--- extern uint64 sys_mkdir(void);
+--- extern uint64 sys_close(void);
+----
+--- // An array mapping syscall numbers from syscall.h
+--- // to the function that handles the system call.
+--- static uint64 (*syscalls[])(void) = {
+---@@ -145,3 +144,4 @@ syscall(void)
+---     p->trapframe->a0 = -1;
+---   }
+--- }
+---+
+---diff --git a/kernel/syscall.h b/kernel/syscall.h
+---index bc5f356..3767022 100644
+------ a/kernel/syscall.h
+---+++ b/kernel/syscall.h
+---@@ -20,3 +20,4 @@
+--- #define SYS_link   19
+--- #define SYS_mkdir  20
+--- #define SYS_close  21
+---+
+---diff --git a/user/init.c b/user/init.c
+---index e0a5689..bc8fd44 100644
+------ a/user/init.c
+---+++ b/user/init.c
+---@@ -25,6 +25,7 @@ main(void)
+--- 
+---   for(;;){
+---     printf("init: starting sh\n");
+---+    printf("/user/init.c          [161920320]     start sh througn exec\n");
+---     pid = fork();
+---     if(pid < 0){
+---       printf("init: fork failed\n");
+---diff --git a/user/rm.c b/user/rm.c
+---index 26b8f1f..006f86a 100644
+------ a/user/rm.c
+---+++ b/user/rm.c
+---@@ -1,4 +1,4 @@
+----#include "kernel/types.h"
+---+  #include "kernel/types.h"
+--- #include "kernel/stat.h"
+--- #include "user/user.h"
+--- 
+---diff --git a/user/sleep.c b/user/sleep.c
+---index e69de29..8c9ed10 100644
+------ a/user/sleep.c
+---+++ b/user/sleep.c
+---@@ -0,0 +1,25 @@
+---+#include "kernel/types.h"
+---+#include "kernel/stat.h"
+---+#include "user/user.h"
+---+
+---+
+---+
+---+int main(int argc, char *argv[])
+---+{
+---+    int a;
+---+    if(argc<=1){
+---+        printf("parameter error!,you should input a sleep time!\n");
+---+        exit(1);
+---+    }
+---+    else if(argc==2)
+---+    {
+---+        a = atoi(argv[1]);
+---+        sleep(a);
+---+    }
+---+    else 
+---+    {
+---+        printf("Too much parameter!\n");
+---+        exit(1);
+---+    }
+---+    exit(0);
+---+}
+---\ No newline at end of file
+-diff --git a/user/init.c b/user/init.c
+-index bc8fd44..5cfaae1 100644
+---- a/user/init.c
+-+++ b/user/init.c
+-@@ -25,7 +25,7 @@ main(void)
+- 
+-   for(;;){
+-     printf("init: starting sh\n");
+--    printf("/user/init.c          [161920320]     start sh througn exec\n");
+-+    printf("/user/init.c main()          [161920320]     start sh througn exec\n");
+-     pid = fork();
+-     if(pid < 0){
+-       printf("init: fork failed\n");

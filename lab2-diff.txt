@@ -1,0 +1,188 @@
+diff --git a/kernel/proc.c b/kernel/proc.c
+index dbc6b84..d82ae65 100644
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -311,7 +311,7 @@ fork(void)
+   np->cwd = idup(p->cwd);
+ 
+   safestrcpy(np->name, p->name, sizeof(p->name));
+-
++  np->mask = p->mask;//将父进程的mask粘贴至子进程。
+   pid = np->pid;
+ 
+   release(&np->lock);
+diff --git a/lab2-diff.txt b/lab2-diff.txt
+index 8a7e4e5..e69de29 100644
+--- a/lab2-diff.txt
++++ b/lab2-diff.txt
+@@ -1,170 +0,0 @@
+-diff --git a/Makefile b/Makefile
+-index 4cc2011..8e4f945 100644
+---- a/Makefile
+-+++ b/Makefile
+-@@ -145,6 +145,8 @@ UPROGS=\
+- 	$U/_sleep\
+- 	$U/_pingpong\
+- 	$U/_primes\
+-+	$U/_tracetest\
+-+	$U/_yieldtest\
+- 
+- ph: notxv6/ph.c
+- 	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
+-diff --git a/kernel/main.c b/kernel/main.c
+-index 674da89..3b90103 100644
+---- a/kernel/main.c
+-+++ b/kernel/main.c
+-@@ -13,7 +13,6 @@ void
+- main()
+- {
+-   if(cpuid() == 0){
+--    printf("/kernel/start.c  main.c cpu0        [161920320]     jumped to main()\n");
+-     consoleinit();
+-     printfinit();
+-     printf("/kernel/mian.c  main.c cpu0        [161920320]     CPU0 start,start initing");
+-diff --git a/kernel/proc.h b/kernel/proc.h
+-index de86c05..0ad05e9 100644
+---- a/kernel/proc.h
+-+++ b/kernel/proc.h
+-@@ -96,6 +96,7 @@ struct proc {
+-   int killed;                  // If non-zero, have been killed
+-   int xstate;                  // Exit status to be returned to parent's wait
+-   int pid;                     // Process ID
+-+  int mask;                    //add this mask to trace syscall
+- 
+-   // wait_lock must be held when using this:
+-   struct proc *parent;         // Parent process
+-diff --git a/kernel/syscall.c b/kernel/syscall.c
+-index 89bb5d6..6172149 100644
+---- a/kernel/syscall.c
+-+++ b/kernel/syscall.c
+-@@ -101,6 +101,8 @@ extern uint64 sys_unlink(void);
+- extern uint64 sys_link(void);
+- extern uint64 sys_mkdir(void);
+- extern uint64 sys_close(void);
+-+extern uint64 sys_trace(void);//added
+-+extern uint64 sys_yield(void);
+- // An array mapping syscall numbers from syscall.h
+- // to the function that handles the system call.
+- static uint64 (*syscalls[])(void) = {
+-@@ -125,6 +127,34 @@ static uint64 (*syscalls[])(void) = {
+- [SYS_link]    sys_link,
+- [SYS_mkdir]   sys_mkdir,
+- [SYS_close]   sys_close,
+-+[SYS_trace]   sys_trace,
+-+[SYS_yield]   sys_yield,
+-+};
+-+
+-+static char *sysname[]={
+-+[SYS_fork]    "fork",
+-+[SYS_exit]    "exit",
+-+[SYS_wait]    "wait",
+-+[SYS_pipe]    "pipe",
+-+[SYS_read]    "read",
+-+[SYS_kill]    "kill",
+-+[SYS_exec]    "exec",
+-+[SYS_fstat]   "fstat",
+-+[SYS_chdir]   "chdir",
+-+[SYS_dup]     "dup",
+-+[SYS_getpid]  "getpid",
+-+[SYS_sbrk]    "sbrk",
+-+[SYS_sleep]   "sleep",
+-+[SYS_uptime]  "uptime",
+-+[SYS_open]    "open",
+-+[SYS_write]   "write",
+-+[SYS_mknod]   "mknod",
+-+[SYS_unlink]  "unlink",
+-+[SYS_link]    "link",
+-+[SYS_mkdir]   "mkdir",
+-+[SYS_close]   "close",
+-+[SYS_trace]   "trace",
+-+[SYS_yield]   "yield",
+- };
+- 
+- void
+-@@ -134,10 +164,15 @@ syscall(void)
+-   struct proc *p = myproc();
+- 
+-   num = p->trapframe->a7;
+-+  //num = * (int *)0;
+-   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+-     // Use num to lookup the system call function for num, call it,
+-     // and store its return value in p->trapframe->a0
+-     p->trapframe->a0 = syscalls[num]();
+-+    if((p->mask)&(1<<num))
+-+    {
+-+      printf("%d: syscall %s -> %d\n",p->pid,sysname[num],p->trapframe->a0);
+-+    }
+-   } else {
+-     printf("%d %s: unknown sys call %d\n",
+-             p->pid, p->name, num);
+-diff --git a/kernel/syscall.h b/kernel/syscall.h
+-index 3767022..10e77dd 100644
+---- a/kernel/syscall.h
+-+++ b/kernel/syscall.h
+-@@ -20,4 +20,6 @@
+- #define SYS_link   19
+- #define SYS_mkdir  20
+- #define SYS_close  21
+-+#define SYS_trace  22
+-+#define SYS_yield  23
+- 
+-diff --git a/kernel/sysproc.c b/kernel/sysproc.c
+-index 1de184e..c1537c8 100644
+---- a/kernel/sysproc.c
+-+++ b/kernel/sysproc.c
+-@@ -89,3 +89,29 @@ sys_uptime(void)
+-   release(&tickslock);
+-   return xticks;
+- }
+-+
+-+uint64
+-+sys_trace(void)
+-+{
+-+  int mask;
+-+  argint(0,&mask);
+-+  if(mask<0){
+-+    return -1;
+-+  }
+-+  else{
+-+    myproc()->mask=mask;
+-+    return 0;
+-+  }
+-+}
+-+
+-+uint64
+-+sys_yield()
+-+{
+-+  printf("start to yield user pc %p\n", myproc()->trapframe->epc);
+-+  struct proc* p=myproc();
+-+  acquire(&p->lock);
+-+  p->state=RUNNABLE;
+-+  sched();
+-+  release(&p->lock);
+-+  return 0;
+-+}
+-\ No newline at end of file
+-diff --git a/user/user.h b/user/user.h
+-index a79ad0a..241e932 100644
+---- a/user/user.h
+-+++ b/user/user.h
+-@@ -22,6 +22,8 @@ int getpid(void);
+- char* sbrk(int);
+- int sleep(int);
+- int uptime(void);
+-+int trace(int);
+-+void yield();
+- 
+- // ulib.c
+- int stat(const char*, struct stat*);
+-diff --git a/user/usys.pl b/user/usys.pl
+-index 01e426e..3a20d45 100755
+---- a/user/usys.pl
+-+++ b/user/usys.pl
+-@@ -36,3 +36,5 @@ entry("getpid");
+- entry("sbrk");
+- entry("sleep");
+- entry("uptime");
+-+entry("trace");
+-+entry("yield");
